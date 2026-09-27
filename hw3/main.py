@@ -9,6 +9,14 @@ HIDDEN_DIMS = [[], [512], [512, 512], [512, 512, 512]]
 HIDDEN_DIMS_NAMES = ["None", "512", "512 -> 512", "512 -> 512 -> 512"]
 LEARING_RATES = [0.025, 0.02, 0.01, 0.001]
 
+# 6.1.4 / 6.1.5 both fix the architecture at a single 512-dimension hidden layer,
+# as the assignment specifies, and vary one design choice at a time.
+FIXED_HIDDEN_DIMS = [512]
+ACTIVATIONS = ["sigmoid", "tanh", "relu", "leaky_relu", "gelu"]
+# 0.02 is the default this architecture uses in explore_mlp_structures; the rest
+# span three orders of magnitude so the plots show under- and over-shooting.
+MLP_LEARNING_RATES = [0.1, 0.02, 0.01, 0.001, 0.0001]
+
 
 def single_run_mlp_lm(train_d, dev_d):
     # TODO: once you have completed the backprop.py, you can run this function to train and evaluate your model,
@@ -71,10 +79,70 @@ def explore_mlp_structures(dev_d: Dict[str, List[Union[str, int]]],
                                                                               test_d)
         all_emb_epoch_dev_accs.append(epoch_dev_accs)
         all_emb_epoch_dev_losses.append(epoch_dev_loss)
-        visualize_epochs(epoch_train_losses, epoch_dev_loss, "Loss", f"mlp_{hidden_dim_names}_loss.png")
+        # hidden_dim_names is a display label ("512 -> 512") and makes a filename
+        # containing spaces and ">", which breaks LaTeX \includegraphics; slug it.
+        slug = "none" if not hidden_dims else "x".join(str(h) for h in hidden_dims)
+        visualize_epochs(epoch_train_losses, epoch_dev_loss, "Loss", f"mlp_{slug}_loss.png")
 
     visualize_configs(all_emb_epoch_dev_accs, HIDDEN_DIMS_NAMES, "Accuracy", "./all_mlp_acc.png")
     visualize_configs(all_emb_epoch_dev_losses, HIDDEN_DIMS_NAMES, "Loss", "./all_mlp_loss.png")
+
+
+def explore_mlp_activations(dev_d: Dict[str, List[Union[str, int]]],
+                            train_d: Dict[str, List[Union[str, int]]],
+                            test_d: Dict[str, List[Union[str, int]]]):
+    all_act_epoch_dev_accs, all_act_epoch_dev_losses = [], []
+
+    print(f"{'-' * 10} Load Pre-trained Embeddings: {EMBEDDING_TYPES[0]} {'-' * 10}")
+    embeddings = gensim.downloader.load(EMBEDDING_TYPES[0])
+
+    for activation in ACTIVATIONS:
+        train_config = EasyDict({
+            'batch_size': 64,
+            'lr': 0.02,
+            'num_epochs': 20,
+            'hidden_dims': FIXED_HIDDEN_DIMS,
+            'activation': activation,
+            'save_path': f'model_activation_{activation}.pth',
+            'embeddings': EMBEDDING_TYPES[0],
+            'num_classes': 2,
+        })
+
+        _, _, epoch_dev_loss, epoch_dev_accs, _, _ = run_mlp(train_config, embeddings, dev_d, train_d, test_d)
+        all_act_epoch_dev_accs.append(epoch_dev_accs)
+        all_act_epoch_dev_losses.append(epoch_dev_loss)
+
+    visualize_configs(all_act_epoch_dev_accs, ACTIVATIONS, "Accuracy", "./mlp_activations_acc.png")
+    visualize_configs(all_act_epoch_dev_losses, ACTIVATIONS, "Loss", "./mlp_activations_loss.png")
+
+
+def explore_mlp_learning_rates(dev_d: Dict[str, List[Union[str, int]]],
+                               train_d: Dict[str, List[Union[str, int]]],
+                               test_d: Dict[str, List[Union[str, int]]]):
+    all_lr_epoch_dev_accs, all_lr_epoch_dev_losses = [], []
+
+    print(f"{'-' * 10} Load Pre-trained Embeddings: {EMBEDDING_TYPES[0]} {'-' * 10}")
+    embeddings = gensim.downloader.load(EMBEDDING_TYPES[0])
+
+    for lr in MLP_LEARNING_RATES:
+        train_config = EasyDict({
+            'batch_size': 64,
+            'lr': lr,
+            'num_epochs': 20,
+            'hidden_dims': FIXED_HIDDEN_DIMS,
+            'activation': 'relu',
+            'save_path': f'model_lr_{lr}.pth',
+            'embeddings': EMBEDDING_TYPES[0],
+            'num_classes': 2,
+        })
+
+        _, _, epoch_dev_loss, epoch_dev_accs, _, _ = run_mlp(train_config, embeddings, dev_d, train_d, test_d)
+        all_lr_epoch_dev_accs.append(epoch_dev_accs)
+        all_lr_epoch_dev_losses.append(epoch_dev_loss)
+
+    lr_names = [str(lr) for lr in MLP_LEARNING_RATES]
+    visualize_configs(all_lr_epoch_dev_accs, lr_names, "Accuracy", "./mlp_learning_rates_acc.png")
+    visualize_configs(all_lr_epoch_dev_losses, lr_names, "Loss", "./mlp_learning_rates_loss.png")
 
 
 if __name__ == '__main__':
@@ -86,13 +154,19 @@ if __name__ == '__main__':
     # uncomment the following line to run
     explore_mlp_structures(dev_data, train_data, test_data)
 
+    # Explore different activation functions (6.1.4)
+    explore_mlp_activations(dev_data, train_data, test_data)
+
+    # Explore different learning rates (6.1.5)
+    explore_mlp_learning_rates(dev_data, train_data, test_data)
+
     # load raw data for lm
     # uncomment the following line to run
-    # train_data, dev_data = load_data_mlp_lm()
+    train_data, dev_data = load_data_mlp_lm()
 
     # Run a single training run
     # uncomment the following line to run
-    # single_run_mlp_lm(train_data, dev_data)
+    single_run_mlp_lm(train_data, dev_data)
 
     # Sample from the pretrained model
     # uncomment the following line to run

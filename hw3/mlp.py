@@ -77,6 +77,10 @@ def featurize(
     # None - if the vector sequence is empty, i.e. the sentence is empty or None of the words in the sentence is in the embedding vocabulary
     # A torch tensor of shape (embed_dim,) - the average word embedding of the sentence
     # Hint: follow the hints in the pdf description
+    if len(vectors) == 0:
+        return None
+
+    return torch.from_numpy(np.mean(vectors, axis=0))
 
 def create_tensor_dataset(
     raw_data: Dict[str, List[Union[int, str]]],
@@ -86,10 +90,17 @@ def create_tensor_dataset(
     for text, label in tqdm(zip(raw_data["text"], raw_data["label"])):
         # TODO (Copy from your HW1): complete the for loop to featurize each sentence
         # only add the feature and label to the list if the feature is not None
+        feature = featurize(text, embeddings)
+        if feature is None:
+            continue
+        all_features.append(feature)
+        all_labels.append(label)
 
         # your code ends here
 
     # stack all features and labels into two single tensors and create a TensorDataset
+    features_tensor = torch.stack(all_features)
+    labels_tensor = torch.tensor(all_labels, dtype=torch.long)
 
 
     return TensorDataset(features_tensor, labels_tensor)
@@ -112,13 +123,34 @@ Defining our First PyTorch Model
 
 
 class SentimentClassifier(nn.Module):
-    def __init__(self, embed_dim: int, num_classes: int, hidden_dims: List[int]):
+    def __init__(
+        self,
+        embed_dim: int,
+        num_classes: int,
+        hidden_dims: List[int],
+        activation: str = "sigmoid",
+    ):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_classes = num_classes
 
         # activation function
-        self.activation = nn.Sigmoid()
+        # 6.1.4: map an activation name to the corresponding nn module so the
+        # architecture can be swapped without touching the rest of the model.
+        self.activations = {
+            "sigmoid": nn.Sigmoid(),
+            "tanh": nn.Tanh(),
+            "relu": nn.ReLU(),
+            "leaky_relu": nn.LeakyReLU(),
+            "gelu": nn.GELU(),
+            "elu": nn.ELU(),
+        }
+        if activation not in self.activations:
+            raise ValueError(
+                f"unknown activation {activation!r}; choose from {sorted(self.activations)}"
+            )
+        self.activation_name = activation
+        self.activation = self.activations[activation]
 
         # linear layers for the MLP
         self.linears = nn.ModuleList()
@@ -131,6 +163,9 @@ class SentimentClassifier(nn.Module):
         # Hint:
         # - Remember to consider the case when there are no hidden layers (i.e. hidden_dims is an empty list)
         #       in this case, it essentially degrades to the architecture we used in hw 1
+        dims = [embed_dim] + list(hidden_dims) + [num_classes]
+        for in_dim, out_dim in zip(dims[:-1], dims[1:]):
+            self.linears.append(nn.Linear(in_dim, out_dim))
 
 
         # your code ends here
@@ -141,6 +176,10 @@ class SentimentClassifier(nn.Module):
 
         # TODO: complete the forward function
         # Hint remember to apply the activation function to all hidden layers except the last one
+        logits = inp
+        for linear in self.linears[:-1]:
+            logits = self.activation(linear(logits))
+        logits = self.linears[-1](logits)
 
 
         # your code ends here
@@ -159,6 +198,7 @@ def accuracy(logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.Float
     # Hint: follow the hints in the pdf description, the return should be a tensor of 0s and 1s with the same shape as labels
     # labels is a tensor of shape (batch_size,)
     # logits is a tensor of shape (batch_size, num_classes)
+    preds = torch.argmax(logits, dim=1)
 
     return (preds == labels).float()
 
@@ -296,7 +336,10 @@ def run_mlp(
 
     print(f"{'-' * 10} Load Model {'-' * 10}")
     model = SentimentClassifier(
-        embeddings.vector_size, config.num_classes, config.hidden_dims
+        embeddings.vector_size,
+        config.num_classes,
+        config.hidden_dims,
+        config.get("activation", "sigmoid"),
     )
     # define optimizer that manages the model's parameters and gradient updates
     # we will learn more about optimizers in future lectures and homework
